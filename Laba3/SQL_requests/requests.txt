@@ -1,0 +1,267 @@
+Вывести:
+#4a - различные адреса всех медработников
+SELECT DISTINCT address FROM MedicalStaff;
+
+#4b - список всех различных медучреждений
+SELECT DISTINCT office FROM JobPlace;
+
+#4c - различные дни, для которых хранится информация о трудовой деятельности
+SELECT DISTINCT weekday FROM WorkActivity;
+
+
+Найти:
+#5a - даты и номера договоров, когда производились операции на сумму не менее 14000руб
+SELECT weekday, contract FROM OperationTypes
+WHERE cost >= 14000;
+
+#5b - размер налога для медперсонала из Выксы или Навашино
+SELECT tax FROM MedicalStaff
+WHERE address IN ('Навашино', 'Выкса');
+
+#5c - название, стоимость и адрес опорного пункта для операций, в названии которых есть слово “Инъекция” и
+стоящих более 10000руб. Результат отсортировать по адресу и стоимости
+SELECT name, cost, strong_point FROM OperationTypes
+WHERE name LIKE '%Инъекция%' and cost > 10000
+ORDER BY strong_point, cost;
+
+
+Вывести записи:
+#6a - дата, фамилия медперсонала, название места работы, название операции
+SELECT WorkActivity.weekday as weekday,
+       MedicalStaff.surname as surname,
+       JobPlace.office as office,
+       OperationTypes.name as opername
+FROM WorkActivity
+INNER JOIN MedicalStaff ON WorkActivity.medical_id = MedicalStaff.id
+INNER JOIN JobPlace ON WorkActivity.jobplace_id = JobPlace.id
+INNER JOIN OperationTypes ON WorkActivity.operation_id = OperationTypes.id;
+
+#6b - номер договора, название места работы, количество операций, оплата. Отсортировать по возрастанию оплаты
+SELECT wa.contract as contract,
+       wp.office as office,
+       wa.amount as amount,
+       wa.payment as payment
+FROM WorkActivity wa
+JOIN JobPlace jp ON wa.jobplace_id = jp.id
+ORDER BY wa.payment;
+
+
+Определить:
+#7a - фамилии и места проживания медперсонала, проведших более одного наложения гипса в день
+SELECT ms.surname as surname, ms.address as address
+FROM WorkActivity wa
+JOIN MedicalStaff as ms ON wa.medical_id = ms.id
+WHERE wa.amount > 1;
+
+#7b - название операций, которые проводили врачи из Вознесенского или Выксы в больницах
+SELECT DISTINCT op.name as opername
+FROM WorkActivity wa
+JOIN JobPlace as jp ON wa.jobplace_id = jp.id
+JOIN MedicalStaff as ms ON wa.medical_id = ms.id
+JOIN OperationTypes as op ON wa.operation_id = op.id
+WHERE ms.address IN ('Вознесенское', 'Выкса');
+
+#7c - названия и размер отчислений в местный бюджет для тех учреждений,
+где проводили операции те, у кого налог не менее 7%, но не более 16%.
+Включить в вывод фамилии таких людей и отсортировать по размеру отчислений и налогу;
+SELECT jp.office as office,
+       jp.local_budget_tax,
+       ms.surname as surname
+FROM WorkActivity wa
+JOIN JobPlace as jp ON wa.jobplace_id = jp.id
+JOIN MedicalStaff as ms ON wa.medical_id = ms.id
+WHERE ms.tax BETWEEN 7 AND 16
+ORDER BY jp.local_budget_tax, ms.tax;
+
+#7d - даты, идентификаторы операций и фамилии тех, кто проводил операции стоимостью не менее 7000руб больше одного раза
+SELECT wa.weekday as weekday,
+       wa.operation_id,
+       ms.surname as surname
+FROM WorkActivity wa
+JOIN MedicalStaff as ms ON wa.medical_id = ms.id
+JOIN OperationTypes as op ON wa.operation_id = op.id
+WHERE op.cost >= 7000 AND wa.operation_id IN
+(SELECT operation_id FROM WorkActivity GROUP BY operation_id, medical_id HAVING COUNT(*) > 1);
+
+
+#8 - Cоздать запрос для модификации всех значений столбца с суммарной величиной оплаты, чтобы он содержал истинную сумму,
+ получаемую медперсоналом (за вычетом налога). Вывести новые значения
+UPDATE WorkActivity as wa
+SET payment = payment * 0.01 * (100 - ms.tax)
+FROM MedicalStaff ms
+WHERE wa.medical_id = ms.id
+RETURNING wa.contract, wa.payment;
+
+
+#9 - Расширить таблицу с данными об операциях столбцом, содержащим величину отчислений в местный бюджет
+для мед.учреждения, где проводилась операция. Создать запрос для ввода конкретных значений во все строки таблицы операций.
+ALTER TABLE WorkActivity ADD COLUMN LocalBudgetDeduction NUMERIC(10, 2);
+UPDATE WorkActivity as wa
+SET local_budget_deduction = payment * 0.01 * jp.local_budget_tax
+FROM JobPlace jp
+WHERE wa.jobplace_id = jp.id;
+
+
+Реализация через IN / NOT IN:
+#10a - найти фамилии медперсонала из Навашино, проводивших инъекции в Выксе
+SELECT DISTINCT ms.surname
+FROM MedicalStaff ms
+JOIN WorkActivity as wa ON wa.medical_id = ms.id
+JOIN OperationTypes as op ON wa.operation_id = op.id
+JOIN JobPlace as jp ON wa.jobplace_id = jp.id
+WHERE ms.address = 'Навашино' AND jp.address = 'Выкса' AND op.name LIKE '%Инъекция%';
+
+#10b - найти те операции, которые не проводились до среды;
+SELECT DISTINCT op.name
+FROM OperationTypes op
+WHERE op.id NOT IN (
+    SELECT wa.operation_id
+    FROM WorkActivity wa
+    WHERE wa.weekday IN ('Понедельник', 'Вторник')
+);
+
+#10c
+(7c)
+/*
+WHERE ms.tax IN (7, 8, 9, 10, 11, 12, 13, 14, 15, 16)
+*/
+
+(7d)
+/*
+без изменений, там уже используется IN
+*/
+
+
+Реализовать через ALL / ANY:
+#11a - найти среди больниц ту, которая имеет наименьший процент отчислений
+SELECT office, local_budget_tax FROM JobPlace
+WHERE local_budget_tax <= ALL (SELECT local_budget_tax FROM JobPlace);
+
+#11b - найти педперсонал, проводивший операции с самой малой суммой оплаты
+SELECT surname FROM MedicalStaff
+JOIN WorkActivity ON WorkActivity.medical_id = MedicalStaff.id
+WHERE payment <= ALL (SELECT payment FROM WorkActivity);
+
+#11c - найти цену самой дорогой операции, проведенной в четверг или пятницу
+SELECT op.cost FROM OperationTypes op
+JOIN WorkActivity wa ON wa.operation_id = op.id
+WHERE op.cost >= ALL (SELECT cost FROM OperationTypes) AND wa.weekday IN ('Пятница', 'Суббота');
+
+#11d - (7a)
+SELECT DISTINCT surname, address FROM MedicalStaff
+JOIN WorkActivity as wa ON wa.medical_id = MedicalStaff.id
+JOIN OperationTypes as op ON wa.operation_id = op.id
+WHERE op.name = 'Наложение гипса'
+      AND wa.amount >= ANY (
+         SELECT wa_copy.amount
+         FROM WorkActivity wa_copy
+         JOIN OperationTypes as op_copy ON wa_copy.operation_id = op_copy.id
+         WHERE op_copy.name = 'Наложение гипса'
+         AND wa.weekday = wa_copy.weekday
+         AND wa.medical_id = wa_copy.medical_id
+);
+
+
+#12 - Используя операцию UNION получить места проживания медпероснала и опороные пункты для операций
+SELECT address FROM MedicalStaff
+UNION
+SELECT strong_point FROM OperationTypes;
+
+
+Реализовать через EXISTS / NOT EXISTS
+#13a - определить тот медперсонал, который не работал в субботу
+SELECT surname FROM MedicalStaff
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM WorkActivity
+    WHERE medical_id = MedicalStaff.id AND weekday = 'Суббота'
+);
+
+#13b - найти такие операции, которые проводились всеми врачами в Выксе
+SELECT DISTINCT op.name FROM OperationTypes op
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM JobPlace jp
+    WHERE jp.address = 'Выкса' AND NOT EXISTS (
+        SELECT 1
+        FROM WorkActivity
+        WHERE jobplace_id = jp.id AND operation_id = op.id
+    )
+);
+
+#13c - определить те места работы, где не делали УЗИ более раза
+SELECT DISTINCT office FROM JobPlace
+WHERE EXISTS (
+    SELECT 1
+    FROM WorkActivity
+    JOIN OperationTypes as op ON operation_id = op.id
+    WHERE jobplace_id = JobPlace.id AND op.name = 'УЗИ'
+    GROUP BY jobplace_id
+    HAVING COUNT(*) <= 1
+);
+
+№13d - определить места работы, где работали все врачи из чужих населенных пунктов
+SELECT jp.institution FROM JobPlace jp
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM MedicalStaff ms
+    WHERE ms.address <> jp.address
+       AND NOT EXISTS (
+          SELECT 1
+          FROM WorkActivity wa
+          WHERE wa.medical_id = ms.id AND wa.jobplace_id = jp.id
+      )
+);
+
+
+Реализовать через агрегатные функции:
+#14a - найти число различных мест работы для медперсонала, работавшего в мед.учреждениях Выксы
+SELECT COUNT(DISTINCT jobplace_id) AS jobplaces_count FROM WorkActivity
+JOIN JobPlace ON WorkActivity.jobplace_id = JobPlace.id
+JOIN MedicalStaff ON WorkActivity.medical_id = MedicalStaff.id
+WHERE JobPlace.address = 'Выкса';
+
+#14b - определить средний размер налога для медперсонала, производившего инъекции
+SELECT AVG(tax) FROM MedicalStaff
+JOIN WorkActivity as wa ON wa.medical_id = MedicalStaff.id
+JOIN OperationTypes as op ON wa.operation_id = op.id
+WHERE op.name LIKE '%Инъекция%';
+
+#14c - кто из медперсонала делал операцию с минимальной стоимостью
+SELECT surname FROM MedicalStaff
+JOIN WorkActivity as wa ON wa.medical_id = MedicalStaff.id
+JOIN OperationTypes as op ON wa.operation_id = op.id
+WHERE op.cost = (SELECT MIN(cost) FROM OperationTypes);
+
+#14d - определить количество операций стоимостью не более 15000, проведенных в понедельник Губановым
+SELECT COUNT(*) AS operation_count FROM WorkActivity wa
+JOIN MedicalStaff as ms ON wa.medical_id = ms.id
+JOIN OperationTypes as op ON wa.operation_id = op.id
+WHERE op.cost <= 15000 AND wa.weekday = 'Понедельник' AND ms.surname = 'Губанов';
+
+
+Реализовать через средства группировки:
+№15a - определить для каждого дня недели и каждой операции сколько раз ее проводили
+SELECT wa.weekday, op.name, COUNT(*) AS operation_count
+FROM WorkActivity wa
+JOIN OperationTypes as op ON wa.operation_id = op.id
+GROUP BY wa.weekday, op.name;
+
+№15b - найти для каждого медработника среднюю стоимость всех проведенных им операций
+SELECT surname, AVG(op.cost) AS avg_operation_cost FROM MedicalStaff
+JOIN WorkActivity as wa ON wa.medical_id = MedicalStaff.id
+JOIN OperationTypes as op ON wa.operation_id = op.id
+GROUP BY surname;
+
+№15с - определить те мед.учреждения, где суммарная величина стоимости всех проведенных в них операций была более 30000
+SELECT office, SUM(op.cost) AS sum_cost FROM JobPlace
+JOIN WorkActivity ON WorkActivity.jobplace_id = JobPlace.id
+JOIN OperationTypes as op ON WorkActivity.operation_id = op.id
+GROUP BY office
+HAVING sum_cost > 30000;
+
+#15d - для каждого дня недели найти число проведенных в этот день операций
+SELECT weekday, COUNT(*) AS total_operation_count
+FROM WorkActivity
+GROUP BY weekday
+ORDER BY weekday;
